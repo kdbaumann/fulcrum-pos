@@ -128,13 +128,59 @@ and per-label shipping fees.
 
 ---
 
-## Decisions needed from you before we start
+## Locked decisions (2026-06-04)
 
-1. **Single dealer vs. multi-dealer SaaS** — just you/your staff, or do you want to sell
-   this to other dealers later? (Changes how strict the multi-tenant isolation must be.)
-2. **In-person card payments** — record manually (cash/Venmo/Zelle) only, or add
-   **Stripe Terminal** hardware for swiping at shows?
-3. **First pricing source** — start with PriceCharting (fastest), or hold for
-   TCGplayer/eBay approval?
-4. **Offline-at-shows** — must-have for the first backend release, or acceptable to ship
-   online-first and add offline sync right after?
+1. **Multi-dealer SaaS** — build multi-tenant from day one: `org_id` on every row,
+   row-level security, and staff **invitations** under each dealer org.
+2. **Payments** — Stripe for cards + digital wallets (**Apple Pay / Google Pay**),
+   **Venmo** via PayPal/Braintree, and keep recording **Zelle / CashApp / cash** manually.
+   (See the Tap-to-Pay caveat below.)
+3. **Pricing** — wire **PriceCharting** first; add TCGplayer/eBay once approved.
+4. **Offline-at-shows** — **must-have** in the first release: PWA + local store + sync queue.
+
+### ⚠️ Payments caveat — "tap" in person vs. online wallets
+
+These are two different things and one needs a native app:
+
+- **Apple Pay / Google Pay as a checkout button** (customer pays online, or on your device's
+  browser) — ✅ works in the web PWA via Stripe. No hardware.
+- **Venmo** — ✅ can be a real online checkout method via **PayPal/Braintree**. Zelle and
+  CashApp have **no merchant charge API**, so those stay manual records (as today).
+- **Accepting a contactless TAP from a customer's card/phone, in person** — ❌ a pure web
+  PWA **cannot** do this. Two real options:
+  - **Tap to Pay on iPhone** (no extra hardware) — requires a **thin native iOS app** using
+    Stripe's iOS SDK. This conflicts slightly with "web-only PWA," so it'd be a small
+    companion app that signs into the same backend.
+  - **Stripe Terminal reader** (hardware, ~$60–300) — works from the web app, no native app.
+
+  **Recommendation:** ship v2 with Apple/Google Pay + Venmo online + manual virtual methods,
+  and pick Tap-to-Pay-on-iPhone (native companion) **or** a Terminal reader for in-person
+  contactless as a fast follow. **This is the one open decision left.**
+
+---
+
+## Revised plan given the locked decisions
+
+Multi-tenant + offline-first both land in the **Foundation** milestone, so it's the
+largest piece. Realistic sizing (rough, relative):
+
+| # | Milestone | Includes | Size |
+|---|---|---|---|
+| 1 | **Foundation** | Supabase project; multi-tenant schema + RLS; auth + staff invites; migrate store to API; **PWA + IndexedDB offline cache + sync queue + conflict handling**; realtime sync | **L (largest)** |
+| 2 | **Payments** | Stripe online checkout (Buy Now + accepted offers) with Apple/Google Pay; Venmo via Braintree; manual methods unchanged | M |
+| 3 | **Pricing** | PriceCharting feed behind the existing daily + pull-up jobs (scheduled functions) | S–M |
+| 4 | **Fulfillment** | EasyPost labels + tracking on the fulfillment screen | S–M |
+| 5 | **Notifications** | Email (Resend) + optional SMS (Twilio) on events we already emit | S |
+| 6 | **Accounting** | QuickBooks Online sync (CSV export covers the gap until then) | M |
+| 7 | **In-person contactless** | Tap to Pay on iPhone (native companion) **or** Stripe Terminal | M |
+
+### Accounts / procurement checklist to start Milestone 1–2
+- [ ] **Supabase** project (free tier to start)
+- [ ] **Stripe** account (business + bank for payouts); enable Apple/Google Pay
+- [ ] **PayPal/Braintree** account (for Venmo) — optional, can defer
+- [ ] **PriceCharting** API subscription
+- [ ] **EasyPost** (or Shippo) account — for Milestone 4
+- [ ] **Resend** + verify sending domain; **Twilio** number if SMS — for Milestone 5
+- [ ] **QuickBooks Online** developer app — for Milestone 6
+- [ ] Decide in-person contactless path (Tap to Pay native app vs Terminal hardware)
+- [ ] Apple Developer account **only if** we go Tap-to-Pay-on-iPhone
