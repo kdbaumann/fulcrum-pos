@@ -6,7 +6,7 @@ import type { InventoryItem, PaymentMethod } from "../types";
 const METHODS: PaymentMethod[] = ["cash", "card", "venmo", "paypal", "zelle", "other"];
 
 export function POS() {
-  const { data, recordSale } = useStore();
+  const { data, recordSale, logSearchMiss } = useStore();
   const [cart, setCart] = useState<string[]>([]);
   const [q, setQ] = useState("");
   const [soldOverride, setSoldOverride] = useState("");
@@ -88,7 +88,11 @@ export function POS() {
               placeholder="Scan or search by name, set, number, FC-ID…"
               value={q}
               onChange={(e) => setQ(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter" && results[0]) add(results[0].i.id); }}
+              onKeyDown={(e) => {
+                if (e.key !== "Enter") return;
+                if (results[0]) add(results[0].i.id);
+                else if (q.trim().length >= 2) { logSearchMiss(q); setQ(""); }
+              }}
             />
             {results.length > 0 && (
               <table style={{ marginTop: 8 }}>

@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useStore } from "../lib/store";
 import { money } from "../lib/format";
@@ -6,9 +7,29 @@ import { money } from "../lib/format";
 // Shows ONLY public info — never cost basis, market value, or min price.
 export function PublicItem() {
   const { id } = useParams();
-  const { data, getItem, getCard } = useStore();
+  const { data, getItem, getCard, buyNow, submitOffer } = useStore();
   const item = id ? getItem(id) : undefined;
   const card = item ? getCard(item.cardMasterId) : undefined;
+  const [done, setDone] = useState<string | null>(null);
+
+  const onBuy = () => {
+    if (!item) return;
+    const name = prompt("Your name for the order") ?? undefined;
+    const tx = buyNow(item.id, name);
+    if (tx) setDone(`Purchase confirmed — order ${tx.id}. Thank you!`);
+  };
+  const onOffer = () => {
+    if (!item) return;
+    const amt = Number(prompt("Your offer amount ($)", String(Math.round(item.askingPrice * 0.85))));
+    if (!Number.isFinite(amt) || amt <= 0) return;
+    const name = prompt("Your name") || "Anonymous";
+    const offer = submitOffer({ inventoryId: item.id, amount: amt, customerName: name });
+    setDone(
+      offer.status === "declined"
+        ? "Thanks — that offer is below the seller's threshold and was declined automatically."
+        : `Offer ${offer.id} submitted. The seller will review and respond.`
+    );
+  };
 
   if (!item) {
     return (
@@ -39,14 +60,12 @@ export function PublicItem() {
 
         <div className="price-big">{money(item.askingPrice)}</div>
 
-        {available ? (
+        {done ? (
+          <p className="banner good" style={{ marginTop: 16 }}>{done}</p>
+        ) : available ? (
           <div className="stack" style={{ marginTop: 16 }}>
-            <button style={{ width: "100%" }} onClick={() => alert("Checkout is wired up in Phase 2 (customer purchase page).")}>
-              Buy now
-            </button>
-            <button className="ghost" style={{ width: "100%" }} onClick={() => alert("Offers go to the owner for Accept / Counter / Decline (Phase 2).")}>
-              Make an offer
-            </button>
+            <button style={{ width: "100%" }} onClick={onBuy}>Buy now</button>
+            <button className="ghost" style={{ width: "100%" }} onClick={onOffer}>Make an offer</button>
           </div>
         ) : sold ? (
           <p className="banner warn" style={{ marginTop: 16 }}>This card has sold.</p>

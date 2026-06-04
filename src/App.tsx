@@ -9,6 +9,11 @@ import { POS } from "./pages/POS";
 import { Transactions } from "./pages/Transactions";
 import { Settings } from "./pages/Settings";
 import { PublicItem } from "./pages/PublicItem";
+import { Catalog } from "./pages/Catalog";
+import { Shows } from "./pages/Shows";
+import { Fulfillment } from "./pages/Fulfillment";
+import { Offers } from "./pages/Offers";
+import { Analytics } from "./pages/Analytics";
 
 export default function App() {
   return (
@@ -24,6 +29,11 @@ export default function App() {
         <Route path="/intake" element={<Intake />} />
         <Route path="/locations" element={<Locations />} />
         <Route path="/pos" element={<POS />} />
+        <Route path="/shows" element={<Shows />} />
+        <Route path="/fulfillment" element={<Fulfillment />} />
+        <Route path="/offers" element={<Offers />} />
+        <Route path="/catalog" element={<Catalog />} />
+        <Route path="/analytics" element={<Analytics />} />
         <Route path="/transactions" element={<Transactions />} />
         <Route path="/settings" element={<Settings />} />
       </Route>

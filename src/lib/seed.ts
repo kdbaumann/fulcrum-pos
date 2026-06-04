@@ -11,6 +11,7 @@ export const DEFAULT_TIERS = [
 export function seedData(): AppData {
   const t = nowISO();
   return {
+    role: "owner",
     settings: {
       businessName: "Fulcrum Cards",
       publicBaseUrl: "https://fulcrumcards.com",
@@ -19,6 +20,8 @@ export function seedData(): AppData {
       tiers: DEFAULT_TIERS.map((x) => ({ ...x })),
       pullUpBulkOver: 10,
       pullUpStandardOver: 50,
+      offerAutoDeclineBelowPct: 60,
+      highValueAlertOver: 250,
     },
     cards: [
       {
@@ -103,6 +106,10 @@ export function seedData(): AppData {
     ],
     batches: [],
     transactions: [],
-    counters: { inventory: 3, transaction: 0, batch: 0, box: 147 },
+    offers: [],
+    shows: [],
+    notifications: [],
+    searchMisses: [],
+    counters: { inventory: 3, transaction: 0, batch: 0, box: 147, offer: 0 },
   };
 }

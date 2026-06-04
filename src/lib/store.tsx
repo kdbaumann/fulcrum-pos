@@ -1,9 +1,16 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
 import type {
   AppData,
+  AppNotification,
   CardMaster,
   InventoryItem,
   IntakeBatch,
+  NotificationKind,
+  Offer,
+  OfferStatus,
+  PullRule,
+  Role,
+  ShowEvent,
   StagedCard,
   StorageLocation,
   Transaction,
@@ -14,17 +21,32 @@ import type {
 import { seedData } from "./seed";
 import { nowISO, pad } from "./format";
 import { tierForPrice } from "./pricing";
+import { uid } from "./ids";
+
+function notif(kind: NotificationKind, message: string): AppNotification {
+  return { id: uid("N-"), kind, message, createdAt: nowISO(), read: false };
+}
 
 const STORAGE_KEY = "fulcrum-pos:v1";
 
 function load(): AppData {
+  const base = seedData();
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) return JSON.parse(raw) as AppData;
+    if (raw) {
+      const saved = JSON.parse(raw) as Partial<AppData>;
+      // Shallow migration: keep saved data, backfill any keys added in later versions.
+      return {
+        ...base,
+        ...saved,
+        settings: { ...base.settings, ...(saved.settings ?? {}) },
+        counters: { ...base.counters, ...(saved.counters ?? {}) },
+      };
+    }
   } catch {
     /* ignore corrupt storage */
   }
-  return seedData();
+  return base;
 }
 
 interface NewStaged {
@@ -66,6 +88,31 @@ interface Store {
     customer?: string;
     note?: string;
   }) => Transaction;
+  // role
+  setRole: (role: Role) => void;
+  // offers
+  submitOffer: (input: { inventoryId: string; amount: number; customerName: string; contact?: string }) => Offer;
+  respondOffer: (offerId: string, action: "accept" | "decline" | "counter", counterAmount?: number) => void;
+  // customer purchase (from public QR page)
+  buyNow: (inventoryId: string, customerName?: string) => Transaction | null;
+  // shows
+  createShow: (input: { id: string; name: string; locationId: string }) => void;
+  addPullRule: (showId: string, rule: Omit<PullRule, "id">) => void;
+  removePullRule: (showId: string, ruleId: string) => void;
+  assignToShow: (showId: string, inventoryIds: string[]) => void;
+  // fulfillment
+  fulfillPull: (inventoryId: string) => void;
+  fulfillShip: (inventoryId: string, carrier: string, tracking: string) => void;
+  // pricing engine
+  runPricingUpdate: () => number; // returns # of cards whose price moved
+  overridePrice: (cardMasterId: string, price: number) => void;
+  // binder refill (red SOLD placeholder replacement)
+  refillBinder: (binderId: string, inventoryId: string) => void;
+  // notifications
+  markNotificationsRead: () => void;
+  clearNotifications: () => void;
+  // analytics input
+  logSearchMiss: (term: string) => void;
   // misc
   resetAll: () => void;
 }
@@ -84,6 +131,49 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   }, [data]);
 
   const store = useMemo<Store>(() => {
+    const recordSaleImpl: Store["recordSale"] = (input) => {
+      const tx = buildTransaction(input, data);
+      setData((d) => {
+        const soldIds = new Set(input.items.map((i) => i.id));
+        const soldAt = nowISO();
+        const binderHits = new Map<string, number>();
+        let pendingCount = 0;
+        for (const it of input.items) {
+          const loc = d.locations.find((l) => l.id === it.locationId);
+          if (loc?.kind === "binder") binderHits.set(loc.id, (binderHits.get(loc.id) ?? 0) + 1);
+        }
+        const inventory = d.inventory.map((i) => {
+          if (!soldIds.has(i.id)) return i;
+          const needsFulfillment =
+            !!input.locationId &&
+            i.locationId !== input.locationId &&
+            d.locations.find((l) => l.id === i.locationId)?.kind === "warehouse";
+          if (needsFulfillment) pendingCount += 1;
+          return {
+            ...i,
+            soldAt,
+            status: (needsFulfillment ? "sold_pending_fulfillment" : "sold") as InventoryItem["status"],
+            fulfillment: needsFulfillment ? { stage: "pending" as const, transactionId: tx.id } : i.fulfillment,
+          };
+        });
+        const notes: AppNotification[] = [notif("sale", `${tx.id}: ${tx.lines.length} card(s) sold for ${tx.soldTotal.toFixed(2)} (${tx.paymentMethod}).`)];
+        const highValue = input.items.find((i) => i.askingPrice >= d.settings.highValueAlertOver);
+        if (highValue) notes.push(notif("high_value_sale", `High-value sale: ${highValue.id} at ${highValue.askingPrice.toFixed(2)}.`));
+        if (pendingCount > 0) notes.push(notif("fulfillment", `${pendingCount} card(s) sold off-site need warehouse fulfillment.`));
+        return {
+          ...d,
+          inventory,
+          locations: d.locations.map((l) =>
+            binderHits.has(l.id) ? { ...l, openSlots: (l.openSlots ?? 0) + (binderHits.get(l.id) ?? 0) } : l
+          ),
+          transactions: [tx, ...d.transactions],
+          notifications: [...notes, ...d.notifications],
+          counters: { ...d.counters, transaction: d.counters.transaction + 1 },
+        };
+      });
+      return tx;
+    };
+
     return {
       data,
 
@@ -232,42 +322,215 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         return newIds;
       },
 
-      recordSale(input) {
-        const tx = buildTransaction(input, data);
+      recordSale: recordSaleImpl,
+
+      setRole(role) {
+        setData((d) => ({ ...d, role }));
+      },
+
+      submitOffer(input) {
+        const item = data.inventory.find((i) => i.id === input.inventoryId);
+        const id = `OFFER-${pad(data.counters.offer + 1)}`;
+        const pct = item && item.askingPrice > 0 ? (input.amount / item.askingPrice) * 100 : 0;
+        const autoDecline = pct > 0 && pct < data.settings.offerAutoDeclineBelowPct;
+        const offer: Offer = {
+          id,
+          inventoryId: input.inventoryId,
+          cardMasterId: item?.cardMasterId ?? "",
+          amount: input.amount,
+          customerName: input.customerName,
+          contact: input.contact,
+          status: autoDecline ? "declined" : "pending",
+          createdAt: nowISO(),
+          respondedAt: autoDecline ? nowISO() : undefined,
+        };
+        setData((d) => ({
+          ...d,
+          offers: [offer, ...d.offers],
+          counters: { ...d.counters, offer: d.counters.offer + 1 },
+          notifications: [
+            notif(
+              "offer",
+              autoDecline
+                ? `Offer ${id} auto-declined (${pct.toFixed(0)}% of asking, below ${d.settings.offerAutoDeclineBelowPct}%).`
+                : `New offer ${id}: ${input.customerName} offered ${input.amount.toFixed(2)} on ${input.inventoryId}.`
+            ),
+            ...d.notifications,
+          ],
+        }));
+        return offer;
+      },
+
+      respondOffer(offerId, action, counterAmount) {
         setData((d) => {
-          const soldIds = new Set(input.items.map((i) => i.id));
-          // increment binder open slots for any binder cards sold
-          const binderHits = new Map<string, number>();
-          for (const it of input.items) {
-            const loc = d.locations.find((l) => l.id === it.locationId);
-            if (loc?.kind === "binder") binderHits.set(loc.id, (binderHits.get(loc.id) ?? 0) + 1);
-          }
+          const offer = d.offers.find((o) => o.id === offerId);
+          if (!offer) return d;
+          const status: OfferStatus =
+            action === "accept" ? "accepted" : action === "counter" ? "countered" : "declined";
+          const token = action === "accept" ? uid("co_") : offer.checkoutToken;
+          return {
+            ...d,
+            offers: d.offers.map((o) =>
+              o.id === offerId
+                ? { ...o, status, counterAmount: action === "counter" ? counterAmount : o.counterAmount, checkoutToken: token, respondedAt: nowISO() }
+                : o
+            ),
+            inventory:
+              action === "accept"
+                ? d.inventory.map((i) => (i.id === offer.inventoryId ? { ...i, status: "reserved" } : i))
+                : d.inventory,
+            notifications: [
+              notif("offer", `Offer ${offerId} ${status}${action === "accept" ? " — checkout link sent." : ""}.`),
+              ...d.notifications,
+            ],
+          };
+        });
+      },
+
+      buyNow(inventoryId, customerName) {
+        const item = data.inventory.find((i) => i.id === inventoryId);
+        if (!item || (item.status !== "available" && item.status !== "at_show")) return null;
+        return recordSaleImpl({
+          items: [item],
+          soldTotal: item.askingPrice,
+          taxRate: data.settings.defaultTaxRate,
+          paymentMethod: "card",
+          operator: "Online",
+          customer: customerName || "Online customer",
+          note: "Customer Buy Now",
+        });
+      },
+
+      createShow(input) {
+        const exists = data.locations.some((l) => l.id === input.locationId);
+        setData((d) => ({
+          ...d,
+          shows: [{ id: input.id, name: input.name, locationId: input.locationId, rules: [], createdAt: nowISO() }, ...d.shows],
+          locations: exists
+            ? d.locations
+            : [...d.locations, { id: input.locationId, kind: "show", label: input.name }],
+        }));
+      },
+      addPullRule(showId, rule) {
+        setData((d) => ({
+          ...d,
+          shows: d.shows.map((s) =>
+            s.id === showId ? { ...s, rules: [...s.rules, { ...rule, id: uid("R-") }] } : s
+          ),
+        }));
+      },
+      removePullRule(showId, ruleId) {
+        setData((d) => ({
+          ...d,
+          shows: d.shows.map((s) =>
+            s.id === showId ? { ...s, rules: s.rules.filter((r) => r.id !== ruleId) } : s
+          ),
+        }));
+      },
+      assignToShow(showId, inventoryIds) {
+        setData((d) => {
+          const show = d.shows.find((s) => s.id === showId);
+          if (!show) return d;
+          const set = new Set(inventoryIds);
           return {
             ...d,
             inventory: d.inventory.map((i) =>
-              soldIds.has(i.id)
-                ? {
-                    ...i,
-                    // sold off-site => needs fulfillment; otherwise plain sold
-                    status:
-                      input.locationId &&
-                      i.locationId !== input.locationId &&
-                      d.locations.find((l) => l.id === i.locationId)?.kind === "warehouse"
-                        ? "sold_pending_fulfillment"
-                        : "sold",
-                  }
-                : i
+              set.has(i.id) ? { ...i, locationId: show.locationId, status: "at_show" } : i
             ),
-            locations: d.locations.map((l) =>
-              binderHits.has(l.id)
-                ? { ...l, openSlots: (l.openSlots ?? 0) + (binderHits.get(l.id) ?? 0) }
-                : l
-            ),
-            transactions: [tx, ...d.transactions],
-            counters: { ...d.counters, transaction: d.counters.transaction + 1 },
+            notifications: [
+              notif("show_transfer", `${inventoryIds.length} card(s) staged to ${show.name} (${show.locationId}).`),
+              ...d.notifications,
+            ],
           };
         });
-        return tx;
+      },
+
+      fulfillPull(inventoryId) {
+        setData((d) => ({
+          ...d,
+          inventory: d.inventory.map((i) =>
+            i.id === inventoryId && i.fulfillment
+              ? { ...i, fulfillment: { ...i.fulfillment, stage: "pulled", pulledAt: nowISO() } }
+              : i
+          ),
+        }));
+      },
+      fulfillShip(inventoryId, carrier, tracking) {
+        setData((d) => ({
+          ...d,
+          inventory: d.inventory.map((i) =>
+            i.id === inventoryId && i.fulfillment
+              ? { ...i, status: "sold", fulfillment: { ...i.fulfillment, stage: "shipped", carrier, tracking, shippedAt: nowISO() } }
+              : i
+          ),
+          notifications: [notif("fulfillment", `${inventoryId} shipped via ${carrier} (${tracking}).`), ...d.notifications],
+        }));
+      },
+
+      runPricingUpdate() {
+        let moved = 0;
+        setData((d) => {
+          // Simulated daily pricing job: nudge non-overridden cards by a deterministic-ish %.
+          const cards = d.cards.map((c, idx) => {
+            if (c.marketOverride) return c;
+            const pct = ((idx * 37 + (Date.now() % 11)) % 21) - 10; // -10%..+10%
+            const next = Math.max(0.25, Math.round(c.marketPrice * (1 + pct / 100) * 100) / 100);
+            if (next !== c.marketPrice) moved += 1;
+            return { ...c, marketPrice: next };
+          });
+          return {
+            ...d,
+            cards,
+            settings: { ...d.settings, lastPricedAt: nowISO() },
+            notifications: [notif("pricing", `Pricing job updated ${moved} card(s) from market sources (simulated).`), ...d.notifications],
+          };
+        });
+        return moved;
+      },
+      overridePrice(cardMasterId, price) {
+        setData((d) => ({
+          ...d,
+          cards: d.cards.map((c) =>
+            c.id === cardMasterId ? { ...c, marketPrice: price, marketOverride: true } : c
+          ),
+        }));
+      },
+
+      refillBinder(binderId, inventoryId) {
+        setData((d) => {
+          const loc = d.locations.find((l) => l.id === binderId);
+          if (!loc || loc.kind !== "binder") return d;
+          return {
+            ...d,
+            inventory: d.inventory.map((i) =>
+              i.id === inventoryId ? { ...i, locationId: binderId, status: "available" } : i
+            ),
+            locations: d.locations.map((l) =>
+              l.id === binderId ? { ...l, openSlots: Math.max(0, (l.openSlots ?? 0) - 1) } : l
+            ),
+          };
+        });
+      },
+
+      markNotificationsRead() {
+        setData((d) => ({ ...d, notifications: d.notifications.map((n) => ({ ...n, read: true })) }));
+      },
+      clearNotifications() {
+        setData((d) => ({ ...d, notifications: [] }));
+      },
+
+      logSearchMiss(term) {
+        const t = term.trim().toLowerCase();
+        if (t.length < 2) return;
+        setData((d) => {
+          const existing = d.searchMisses.find((m) => m.term === t);
+          return {
+            ...d,
+            searchMisses: existing
+              ? d.searchMisses.map((m) => (m.term === t ? { ...m, count: m.count + 1, lastAt: nowISO() } : m))
+              : [{ term: t, count: 1, lastAt: nowISO() }, ...d.searchMisses],
+          };
+        });
       },
 
       resetAll() {
