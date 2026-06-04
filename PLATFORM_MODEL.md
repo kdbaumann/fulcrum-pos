@@ -153,13 +153,22 @@ deliberate later investment.
 
 ---
 
-## 8. Decisions that gate the build
+## 8. Locked decisions (2026-06-04)
 
-1. **Scope of account types at launch** — build all three account types now (recommended, so
-   the schema/login is right), or vendors-only first and bolt on collectors later?
-2. **Marketplace model first** — start **connection-first** (offers + reveal contact, parties
-   settle themselves) or go straight to **facilitated payments** (Stripe Connect + tax)?
-3. **Collector pricing** — Free tier + paid **Plus** (freemium, recommended), or single free
-   tier for now?
-4. **PII/EIN timing** — collect minimally at signup and ask for more just-in-time
-   (recommended), or full KYC up front?
+1. **All three account types now** — vendor, collector, platform admin baked into the schema
+   and signup so auth isn't re-architected later.
+2. **Marketplace: connection-first now, facilitated later.** Build the data model so it can
+   grow into Stripe Connect + commission + tax (decision #2), but **launch connection-first**
+   (offers + reveal contact, parties settle themselves). Going facilitated requires
+   significant **off-app** work (legal entity, Connect onboarding, tax registration, T&S
+   policy) before it can go live — tracked separately.
+3. **Collectors freemium with a configurable cap.** Free tier limited to ~**100 inventory
+   items** (the cap lives in a `plans` table so the platform admin can change it per plan);
+   paid **Plus** lifts the cap + unlocks power features. Marketplace commission on top.
+4. **Minimal + just-in-time PII.** Name + email + account type at signup; address/EIN/payment
+   collected only when a feature needs it.
+
+> **Off-app checklist before facilitated payments (decision #2) can launch:** form the
+> business entity, complete Stripe Connect platform onboarding, register for sales-tax
+> collection (or enable Stripe Tax), set 1099-K handling, and publish marketplace/T&S +
+> refund/dispute policies. None of this blocks connection-first launch.

@@ -7,17 +7,30 @@ database schema; the app's data layer is wired to it in the following sub-steps.
 1. Sign up at https://supabase.com and create a new project (free tier is fine to start).
 2. Choose a region close to you; save the database password.
 
-## 2. Apply the schema
+## 2. Apply the schema (run both migrations, in order)
 **Option A — SQL editor (no tooling):** open the project → **SQL Editor** → paste the
-contents of `migrations/0001_init.sql` → **Run**.
+contents of `migrations/0001_init.sql` → **Run**, then do the same for
+`migrations/0002_platform.sql`.
 
 **Option B — Supabase CLI (repeatable):**
 ```bash
 brew install supabase/tap/supabase
 supabase login
-supabase link --project-ref <your-project-ref>
-supabase db push        # applies everything in supabase/migrations/
+supabase link --project-ref zqzfypybghryogcjfzdw
+supabase db push        # applies everything in supabase/migrations/ in order
 ```
+
+`0002_platform.sql` adds: account types (vendor/collector), `profiles`, `platform_admins`,
+configurable `plans` + `subscriptions` (free-tier inventory cap), marketplace-ready columns,
+`want_lists`, cross-account offers, and the `browse_listings` discovery RPC.
+
+### Make yourself the platform superuser (one time, after you sign up)
+`platform_admins` starts empty by design. After the app's login exists and **you've signed
+up once**, find your user id in **Authentication → Users**, then run in the SQL editor:
+```sql
+insert into platform_admins (user_id) values ('<your-auth-user-uuid>');
+```
+That single row makes you the platform admin. (We can wire a friendlier one-time claim later.)
 
 ## 3. Grab your keys
 Project → **Settings → API**. You'll need:
