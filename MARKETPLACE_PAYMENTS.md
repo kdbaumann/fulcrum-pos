@@ -68,15 +68,27 @@ transmitter (funds settle through Stripe, not our bank).
 
 ---
 
-## Open decisions that shape the payments build
+## Locked decisions (2026-06-04)
 
-1. **Connected-account type** — Express (recommended), Standard, or Custom?
-2. **Money flow** — destination charges (simpler) or escrow-style hold-and-release (buyer
-   protection, more complex)?
-3. **Who can sell** — vendors **and** collectors (recommended), or vendors only at first?
-4. **Build order** — keep building the app (login → vendor → collector → listings) **now**
-   while you run the off-app checklist in parallel (recommended), or pause app work to focus
-   on payments groundwork first?
+1. **Connected-account type: Express.** Commission is taken invisibly as an
+   `application_fee_amount` (works in Express *and* Standard), but Express is easier
+   long-term for both vendors and collectors (Stripe-hosted onboarding, KYC, and 1099-K; no
+   separate full Stripe account to manage) and keeps our fee least visible. Offer Standard
+   later for large vendors who want to own their Stripe relationship.
+2. **Hybrid money flow:**
+   - **In-person** (store / show / street) → **immediate** charge + transfer; order closed at
+     point of sale.
+   - **Online / mailed** → **escrow-style hold**: capture buyer funds, seller ships + enters
+     **tracking** (via the EasyPost shipping integration), auto-**release to seller on
+     delivered status** (or after a safety window / buyer confirmation); a dispute pauses the
+     release.
+   - Implemented as an order `flow_type ∈ (instant, escrow)` driving a state machine:
+     `paid → [instant: released] | [escrow: held → shipped(tracking) → delivered → released]`,
+     with auto-release timer + dispute hold.
+3. **Who can sell: vendors *and* collectors.** Collectors selling personal cards drive
+   liquidity + data; Stripe handles their KYC/1099-K via Express.
+4. **Build order: app now, off-app groundwork in parallel.**
 
-(These can be finalized when we reach the payments milestone; #1–#3 mainly affect the
-`orders`/`payments` schema, which we haven't written yet.)
+Escrow means the platform briefly **controls held funds** — the standard Stripe Connect
+"separate charges & transfers (delayed)" pattern handles this, but **confirm with a
+payments/tax attorney** for your states (money-transmission edge cases).
