@@ -157,11 +157,10 @@ deliberate later investment.
 
 1. **All three account types now** — vendor, collector, platform admin baked into the schema
    and signup so auth isn't re-architected later.
-2. **Marketplace: connection-first now, facilitated later.** Build the data model so it can
-   grow into Stripe Connect + commission + tax (decision #2), but **launch connection-first**
-   (offers + reveal contact, parties settle themselves). Going facilitated requires
-   significant **off-app** work (legal entity, Connect onboarding, tax registration, T&S
-   policy) before it can go live — tracked separately.
+2. **Marketplace: facilitated payments is the target (updated 2026-06-04).** Go straight for
+   Stripe Connect + commission + tax rather than connection-first. The off-app groundwork
+   (entity, Connect onboarding, tax registration, legal/T&S) runs **in parallel** with app
+   development and gates go-live. Full scope in `MARKETPLACE_PAYMENTS.md`.
 3. **Collectors freemium with a configurable cap.** Free tier limited to ~**100 inventory
    items** (the cap lives in a `plans` table so the platform admin can change it per plan);
    paid **Plus** lifts the cap + unlocks power features. Marketplace commission on top.
