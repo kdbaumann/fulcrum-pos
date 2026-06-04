@@ -153,9 +153,11 @@ These are two different things and one needs a native app:
     companion app that signs into the same backend.
   - **Stripe Terminal reader** (hardware, ~$60–300) — works from the web app, no native app.
 
-  **Recommendation:** ship v2 with Apple/Google Pay + Venmo online + manual virtual methods,
-  and pick Tap-to-Pay-on-iPhone (native companion) **or** a Terminal reader for in-person
-  contactless as a fast follow. **This is the one open decision left.**
+  **DECIDED (2026-06-04):** ship v2 with Apple/Google Pay + Venmo online + manual virtual
+  methods; **defer in-person contactless to a fast-follow** (Milestone 7), choosing
+  Tap-to-Pay-on-iPhone vs. a Stripe smart reader at that time. Reminder: *any* card charge
+  (online or in person) needs connectivity — bring a mobile hotspot to shows; offline mode
+  covers inventory, cart, and cash/manual sales only.
 
 ---
 
