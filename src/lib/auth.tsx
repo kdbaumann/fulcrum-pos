@@ -21,6 +21,9 @@ interface AuthState {
   org: CurrentOrg | null;
   signUp: (i: { email: string; password: string; displayName: string; orgName: string; type: AccountType }) => Promise<{ error?: string; needsConfirmation?: boolean }>;
   signIn: (email: string, password: string) => Promise<{ error?: string }>;
+  signInWithPhone: (phone: string) => Promise<{ error?: string }>;
+  verifyPhoneOtp: (phone: string, token: string) => Promise<{ error?: string }>;
+  resetPasswordEmail: (email: string) => Promise<{ error?: string }>;
   signOut: () => Promise<void>;
   createOrg: (name: string, type: AccountType) => Promise<{ error?: string }>;
   enterLocalDemo: () => void;
@@ -133,6 +136,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     async signIn(email, password) {
       if (!supabase) return { error: "Backend not configured" };
       const { error } = await supabase.auth.signInWithPassword({ email, password });
+      return error ? { error: error.message } : {};
+    },
+    async signInWithPhone(phone) {
+      if (!supabase) return { error: "Backend not configured" };
+      // Sends a 6-digit SMS code. Requires an SMS provider (e.g. Twilio) configured in Supabase.
+      const { error } = await supabase.auth.signInWithOtp({ phone });
+      return error ? { error: error.message } : {};
+    },
+    async verifyPhoneOtp(phone, token) {
+      if (!supabase) return { error: "Backend not configured" };
+      const { error } = await supabase.auth.verifyOtp({ phone, token, type: "sms" });
+      return error ? { error: error.message } : {};
+    },
+    async resetPasswordEmail(email) {
+      if (!supabase) return { error: "Backend not configured" };
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: `${window.location.origin}/`,
+      });
       return error ? { error: error.message } : {};
     },
     async signOut() {
