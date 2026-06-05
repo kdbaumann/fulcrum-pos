@@ -132,6 +132,11 @@ a { color: var(--accent); }
 .notif-item { padding: 8px 0; border-bottom: 1px solid var(--line); }
 .notif-item:last-child { border-bottom: none; }
 
+.auth-wrap {
+  min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px;
+}
+.auth-card { width: 100%; max-width: 380px; }
+
 /* Printable label sheet */
 .labels { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 .label {

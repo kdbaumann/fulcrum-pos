@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
 import { useStore } from "../lib/store";
+import { useAuth } from "../lib/auth";
 import { shortDate } from "../lib/format";
 import type { Role } from "../types";
 
@@ -22,7 +23,9 @@ const links: { to: string; label: string; end?: boolean; ownerOnly?: boolean }[]
 
 export function Layout() {
   const { data, setRole } = useStore();
-  const isOwner = data.role === "owner";
+  const { session, org, signOut, exitLocalDemo, localDemo } = useAuth();
+  // In cloud mode the role comes from the signed-in membership; in local mode use the local switcher.
+  const isOwner = org ? org.role === "owner" : data.role === "owner";
   const visible = links.filter((l) => isOwner || !l.ownerOnly);
 
   return (
@@ -30,19 +33,31 @@ export function Layout() {
       <header className="topbar">
         <div className="brand">
           <span className="logo">◆</span>
-          <span>{data.settings.businessName}</span>
+          <span>{org ? org.name : data.settings.businessName}</span>
+          {org && <span className="badge tier-standard" style={{ marginLeft: 6 }}>{org.type}</span>}
         </div>
         <div className="row" style={{ alignItems: "center", gap: 10 }}>
           <NotificationBell />
-          <select
-            aria-label="Role"
-            value={data.role}
-            onChange={(e) => setRole(e.target.value as Role)}
-            style={{ width: "auto", padding: "6px 10px" }}
-          >
-            <option value="owner">Owner</option>
-            <option value="operator">Operator</option>
-          </select>
+          {session && org ? (
+            <>
+              <span className="muted small">{org.role}</span>
+              <button className="ghost sm" onClick={signOut}>Sign out</button>
+            </>
+          ) : localDemo ? (
+            <>
+              <span className="badge tier-bulk">local demo</span>
+              <button className="ghost sm" onClick={exitLocalDemo}>Exit demo</button>
+              <select aria-label="Role" value={data.role} onChange={(e) => setRole(e.target.value as Role)} style={{ width: "auto", padding: "6px 10px" }}>
+                <option value="owner">Owner</option>
+                <option value="operator">Operator</option>
+              </select>
+            </>
+          ) : (
+            <select aria-label="Role" value={data.role} onChange={(e) => setRole(e.target.value as Role)} style={{ width: "auto", padding: "6px 10px" }}>
+              <option value="owner">Owner</option>
+              <option value="operator">Operator</option>
+            </select>
+          )}
         </div>
       </header>
       <nav className="tabs">

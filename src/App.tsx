@@ -1,4 +1,5 @@
 import { Routes, Route } from "react-router-dom";
+import { AuthGate } from "./components/AuthGate";
 import { Layout } from "./components/Layout";
 import { Dashboard } from "./pages/Dashboard";
 import { Inventory } from "./pages/Inventory";
@@ -21,7 +22,8 @@ export default function App() {
       {/* Public customer-facing QR landing page — no dealer chrome */}
       <Route path="/i/:id" element={<PublicItem />} />
 
-      {/* Dealer / admin app */}
+      {/* Dealer / admin app — gated by auth (local-demo bypass inside AuthGate) */}
+      <Route element={<AuthGate />}>
       <Route element={<Layout />}>
         <Route path="/" element={<Dashboard />} />
         <Route path="/inventory" element={<Inventory />} />
@@ -36,6 +38,7 @@ export default function App() {
         <Route path="/analytics" element={<Analytics />} />
         <Route path="/transactions" element={<Transactions />} />
         <Route path="/settings" element={<Settings />} />
+      </Route>
       </Route>
     </Routes>
   );

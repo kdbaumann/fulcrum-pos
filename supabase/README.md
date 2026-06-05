@@ -47,9 +47,15 @@ VITE_SUPABASE_ANON_KEY=eyJhbGciOi...
 > protects each dealer's data. Never put the **service_role** key in the frontend.
 
 ## 4. Enable auth
-Project → **Authentication → Providers**: enable **Email** (magic link or password).
-Optionally enable **Google**. Set the Site URL to your Netlify URL (and `localhost:5173`
-for local dev) under **Authentication → URL Configuration**.
+Project → **Authentication → Providers**: enable **Email** (password). Optionally enable
+**Google**. Set the Site URL to your Netlify URL (and `localhost:5173` for local dev) under
+**Authentication → URL Configuration**.
+
+**For fast testing, turn OFF email confirmation:** Authentication → Providers → Email →
+disable **"Confirm email"**. Then signup creates a session immediately and the app finishes
+org setup automatically. (Turn it back on before public launch — the app already handles the
+confirm-then-sign-in flow gracefully: it shows a "check your email" message and completes org
+bootstrap on the user's first confirmed sign-in.)
 
 ## 5. First org
 After a user signs up, the app calls `create_org(name, slug)` once to create their
