@@ -29,15 +29,11 @@ session for the matched user.
 
 We'll already be standing up Edge Functions for Stripe webhooks, so passkeys slot in there.
 
-**Two ways to deliver:**
-- **A — Full passkeys (recommended, with the Functions milestone):** true biometric login,
-  cross-session, phishing-resistant. Needs the Edge Function above. No third-party cost.
-- **B — Interim biometric lock (quick):** after a normal login, persist the session and
-  require a device biometric (WebAuthn user-verification) to "unlock" the app on return. Feels
-  like biometric sign-on immediately; it's a convenience lock over a saved session, not full
-  re-authentication. Can ship now, upgrade to A later.
-
-No third-party account is required for passkeys themselves — just the function deployment.
+**DECIDED (2026-06-04): full passkeys, built with the Edge Functions milestone.** True
+biometric login (Face ID/Touch ID/Windows Hello), cross-session and phishing-resistant, via
+WebAuthn + the verification Edge Function described above. No third-party account or cost —
+just the function deployment, which we're doing anyway for Stripe webhooks. (Interim
+"biometric lock over saved session" was considered and skipped in favor of doing it right.)
 
 ## 3. Email confirmation (testing)
 
