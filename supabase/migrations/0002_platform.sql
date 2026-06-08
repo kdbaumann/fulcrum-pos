@@ -12,7 +12,11 @@
 -- ---------------------------------------------------------------------------
 -- Account type on organizations
 -- ---------------------------------------------------------------------------
-create type org_type as enum ('vendor','collector');
+do $$ begin
+  if not exists (select 1 from pg_type where typname = 'org_type') then
+    create type org_type as enum ('vendor','collector');
+  end if;
+end $$;
 
 alter table organizations
   add column if not exists type               org_type not null default 'vendor',
@@ -23,7 +27,7 @@ alter table organizations
 -- ---------------------------------------------------------------------------
 -- User profiles (PII; minimal at signup, enriched just-in-time)
 -- ---------------------------------------------------------------------------
-create table profiles (
+create table if not exists profiles (
   user_id     uuid primary key references auth.users(id) on delete cascade,
   full_name   text not null default '',
   email       text,
@@ -36,7 +40,7 @@ create table profiles (
 -- ---------------------------------------------------------------------------
 -- Platform admins (the superuser; seeded once after signup — see README)
 -- ---------------------------------------------------------------------------
-create table platform_admins (
+create table if not exists platform_admins (
   user_id    uuid primary key references auth.users(id) on delete cascade,
   created_at timestamptz not null default now()
 );
@@ -49,7 +53,7 @@ $$;
 -- ---------------------------------------------------------------------------
 -- Plans (platform-admin configurable) + subscriptions
 -- ---------------------------------------------------------------------------
-create table plans (
+create table if not exists plans (
   key            text primary key,           -- collector_free, vendor_pro, ...
   audience       org_type not null,
   name           text not null,
@@ -69,7 +73,7 @@ insert into plans (key, audience, name, price_cents, max_inventory, max_seats, m
   ('vendor_elite',    'vendor',    'Vendor Elite',   19900, null, 25, 3, 50)
 on conflict (key) do nothing;
 
-create table subscriptions (
+create table if not exists subscriptions (
   org_id               uuid primary key references organizations(id) on delete cascade,
   plan_key             text not null references plans(key),
   status               text not null default 'active',  -- active|past_due|canceled|trialing
@@ -86,7 +90,7 @@ alter table inventory_items
   add column if not exists list_price     numeric,
   add column if not exists open_to_offers boolean not null default false;  -- discoverable while unlisted
 
-create table want_lists (
+create table if not exists want_lists (
   id          uuid primary key default gen_random_uuid(),
   org_id      uuid not null references organizations(id) on delete cascade,
   game        text,
@@ -185,25 +189,33 @@ alter table subscriptions   enable row level security;
 alter table want_lists      enable row level security;
 
 -- profiles: a user manages only their own row (admins read via is_platform_admin)
+drop policy if exists profile_self on profiles;
 create policy profile_self on profiles for all
   using (user_id = auth.uid() or is_platform_admin())
   with check (user_id = auth.uid());
 
 -- platform_admins: self/admin can read; inserts happen via SQL editor / service role only
+drop policy if exists padmin_read on platform_admins;
 create policy padmin_read on platform_admins for select
   using (user_id = auth.uid() or is_platform_admin());
 
 -- plans: any signed-in user can read; only platform admin can change
+drop policy if exists plans_read on plans;
+drop policy if exists plans_write on plans;
 create policy plans_read  on plans for select to authenticated using (true);
 create policy plans_write on plans for all using (is_platform_admin()) with check (is_platform_admin());
 
 -- subscriptions: org members (or admin) read; admin writes (Stripe webhooks use service role)
+drop policy if exists subs_read on subscriptions;
+drop policy if exists subs_write on subscriptions;
 create policy subs_read  on subscriptions for select using (is_member(org_id) or is_platform_admin());
 create policy subs_write on subscriptions for all using (is_platform_admin()) with check (is_platform_admin());
 
 -- want_lists: org members manage their own
+drop policy if exists want_member_all on want_lists;
 create policy want_member_all on want_lists for all using (is_member(org_id)) with check (is_member(org_id));
 
 -- offers: in addition to seller-org members (policy from 0001), let the BUYER org see offers it made
+drop policy if exists offers_buyer_select on offers;
 create policy offers_buyer_select on offers for select
   using (buyer_org_id is not null and is_member(buyer_org_id));
