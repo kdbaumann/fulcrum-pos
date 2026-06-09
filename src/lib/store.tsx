@@ -22,6 +22,9 @@ import { seedData } from "./seed";
 import { nowISO, pad } from "./format";
 import { tierForPrice } from "./pricing";
 import { uid } from "./ids";
+import { isSupabaseConfigured } from "./supabase";
+import { useAuth } from "./auth";
+import * as repo from "./repo";
 
 function notif(kind: NotificationKind, message: string): AppNotification {
   return { id: uid("N-"), kind, message, createdAt: nowISO(), read: false };
@@ -76,7 +79,9 @@ interface Store {
   updateStaged: (batchId: string, tempId: string, patch: Partial<StagedCard>) => void;
   removeStaged: (batchId: string, tempId: string) => void;
   discardBatch: (batchId: string) => void;
-  commitBatch: (batchId: string) => string[]; // returns new inventory ids in scan order
+  commitBatch: (batchId: string) => Promise<string[]>; // new inventory ids in scan order
+  /** true while cloud data is loading; false in local mode */
+  loading: boolean;
   // sales
   recordSale: (input: {
     items: InventoryItem[];
@@ -120,15 +125,39 @@ interface Store {
 const Ctx = createContext<Store | null>(null);
 
 export function StoreProvider({ children }: { children: React.ReactNode }) {
-  const [data, setData] = useState<AppData>(load);
+  const { org } = useAuth();
+  const cloud = isSupabaseConfigured && !!org;
+  const orgId = org?.id ?? null;
 
+  const [data, setData] = useState<AppData>(load);
+  const [loading, setLoading] = useState(false);
+
+  // Cloud mode: load this org's data from Supabase whenever the org changes.
   useEffect(() => {
+    if (!cloud || !orgId) return;
+    let cancelled = false;
+    setLoading(true);
+    repo
+      .loadAll(orgId)
+      .then((d) => { if (!cancelled) { setData({ ...d, role: org!.role }); } })
+      .catch((e) => { if (!cancelled) console.error("loadAll failed", e); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [cloud, orgId]);
+
+  // Local mode only: persist to localStorage. (Cloud mode persists to Supabase.)
+  useEffect(() => {
+    if (cloud) return;
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
     } catch {
       /* storage full / unavailable */
     }
-  }, [data]);
+  }, [data, cloud]);
+
+  // surface a DB write failure as a notification (cloud mode)
+  const onDbError = (e: any) =>
+    setData((d) => ({ ...d, notifications: [notif("inventory_mismatch", `Sync error: ${e?.message ?? e}`), ...d.notifications] }));
 
   const store = useMemo<Store>(() => {
     const recordSaleImpl: Store["recordSale"] = (input) => {
@@ -176,9 +205,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
     return {
       data,
+      loading,
 
       updateSettings(patch) {
         setData((d) => ({ ...d, settings: { ...d.settings, ...patch } }));
+        if (cloud) repo.saveSettings(patch).catch(onDbError);
       },
 
       getCard(id) {
@@ -192,6 +223,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             cards: exists ? d.cards.map((c) => (c.id === card.id ? card : c)) : [...d.cards, card],
           };
         });
+        if (cloud) repo.upsertCardRow(card).catch(onDbError);
       },
 
       getItem(id) {
@@ -202,16 +234,19 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           ...d,
           inventory: d.inventory.map((i) => (i.id === id ? { ...i, ...patch } : i)),
         }));
+        if (cloud) repo.updateItemRow(id, patch).catch(onDbError);
       },
 
       addLocation(loc) {
         setData((d) => ({ ...d, locations: [...d.locations, loc] }));
+        if (cloud) repo.insertLocationRow(loc).catch(onDbError);
       },
       updateLocation(id, patch) {
         setData((d) => ({
           ...d,
           locations: d.locations.map((l) => (l.id === id ? { ...l, ...patch } : l)),
         }));
+        if (cloud) repo.updateLocationRow(id, patch).catch(onDbError);
       },
 
       createBatch(init) {
@@ -285,41 +320,63 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         }));
       },
 
-      commitBatch(batchId) {
-        const newIds: string[] = [];
-        setData((d) => {
-          const batch = d.batches.find((b) => b.id === batchId);
-          if (!batch || batch.status !== "open") return d;
-          let counter = d.counters.inventory;
-          const created: InventoryItem[] = batch.staged.map((s, idx) => {
-            counter += 1;
-            const id = `FC-${pad(counter)}`;
-            newIds.push(id);
-            return {
-              id,
-              cardMasterId: s.cardMasterId ?? "",
-              costBasis: s.costBasis,
-              askingPrice: s.askingPrice,
-              status: "available",
-              tier: tierForPrice(s.askingPrice, d.settings.tiers),
-              locationId: batch.locationId,
-              condition: s.condition,
-              createdAt: nowISO(),
-              batchOrder: idx + 1,
-            };
-          });
-          return {
+      async commitBatch(batchId) {
+        const batch = data.batches.find((b) => b.id === batchId);
+        if (!batch || batch.status !== "open") return [];
+        const mkItem = (s: StagedCard, idx: number, id: string): InventoryItem => ({
+          id,
+          cardMasterId: s.cardMasterId ?? "",
+          costBasis: s.costBasis,
+          askingPrice: s.askingPrice,
+          status: "available",
+          tier: tierForPrice(s.askingPrice, data.settings.tiers),
+          locationId: batch.locationId,
+          condition: s.condition,
+          createdAt: nowISO(),
+          batchOrder: idx + 1,
+        });
+
+        if (cloud) {
+          const created: InventoryItem[] = [];
+          for (let idx = 0; idx < batch.staged.length; idx++) {
+            let code: string;
+            try {
+              code = await repo.nextCode("inventory", "FC-");
+            } catch (e) {
+              onDbError(e);
+              break;
+            }
+            const item = mkItem(batch.staged[idx], idx, code);
+            try {
+              await repo.insertInventoryRow(item);
+            } catch (e) {
+              onDbError(e);
+              break;
+            }
+            created.push(item);
+          }
+          setData((d) => ({
             ...d,
             inventory: [...created, ...d.inventory],
-            counters: { ...d.counters, inventory: counter },
             batches: d.batches.map((b) =>
-              b.id === batchId
-                ? { ...b, status: "committed", committedInventoryIds: created.map((c) => c.id) }
-                : b
+              b.id === batchId ? { ...b, status: "committed", committedInventoryIds: created.map((c) => c.id) } : b
             ),
-          };
-        });
-        return newIds;
+          }));
+          return created.map((c) => c.id);
+        }
+
+        // local mode
+        let counter = data.counters.inventory;
+        const created = batch.staged.map((s, idx) => mkItem(s, idx, `FC-${pad((counter += 1))}`));
+        setData((d) => ({
+          ...d,
+          inventory: [...created, ...d.inventory],
+          counters: { ...d.counters, inventory: counter },
+          batches: d.batches.map((b) =>
+            b.id === batchId ? { ...b, status: "committed", committedInventoryIds: created.map((c) => c.id) } : b
+          ),
+        }));
+        return created.map((c) => c.id);
       },
 
       recordSale: recordSaleImpl,
@@ -494,6 +551,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             c.id === cardMasterId ? { ...c, marketPrice: price, marketOverride: true } : c
           ),
         }));
+        if (cloud) repo.setCardPriceRow(cardMasterId, price, true).catch(onDbError);
       },
 
       refillBinder(binderId, inventoryId) {
@@ -537,7 +595,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         setData(seedData());
       },
     };
-  }, [data]);
+  }, [data, cloud, loading]);
 
   return <Ctx.Provider value={store}>{children}</Ctx.Provider>;
 }

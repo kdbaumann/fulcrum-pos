@@ -115,9 +115,9 @@ function ActiveBatch({
     setRawName(""); setCardMasterId(""); setCost(""); setAsk("");
   };
 
-  const commit = () => {
+  const commit = async () => {
     if (meta?.requireApproval && !confirm(`${meta.label} tier requires owner approval. Commit ${batch.staged.length} cards?`)) return;
-    const ids = onCommit(batch.id);
+    const ids = await onCommit(batch.id);
     setPrintIds(ids);
   };
 

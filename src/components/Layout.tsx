@@ -22,7 +22,7 @@ const links: { to: string; label: string; end?: boolean; ownerOnly?: boolean }[]
 ];
 
 export function Layout() {
-  const { data, setRole } = useStore();
+  const { data, setRole, loading } = useStore();
   const { session, org, signOut, exitLocalDemo, localDemo } = useAuth();
   // In cloud mode the role comes from the signed-in membership; in local mode use the local switcher.
   const isOwner = org ? org.role === "owner" : data.role === "owner";
@@ -68,7 +68,7 @@ export function Layout() {
         ))}
       </nav>
       <main className="content">
-        <Outlet />
+        {loading ? <p className="muted">Loading your data…</p> : <Outlet />}
       </main>
     </div>
   );
